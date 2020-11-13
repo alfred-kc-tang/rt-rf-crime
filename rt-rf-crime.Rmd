@@ -1,0 +1,207 @@
+---
+title: "Regression Tree and Random Forest on Crime Rates"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Exploratory Data Analysis (EDA)
+
+```{r}
+data <- read.table("uscrime.txt", header = TRUE)
+dim(data)
+```
+
+There are 47 observations with 16 variables, one of which is the response variable, i.e. crime rate, that we are going to predict using regression tree and random forest. Before building the two models, Let us first proceed on EDA by taking a took at the data with head and summary functions, and then plot scatterplots of the response variable against each of the explanatory variables.
+
+```{r}
+head(data)
+```
+
+```{r}
+summary(data)
+```
+
+```{r}
+par(mfrow = c(4, 4), mar = c(2, 2, 2, 2)) 
+for (i in 1:15) {
+  plot(data[, i], data[, 16], main = names(data)[i])
+}
+```
+
+After seeing how the explantory variables relate to the response variable in the scatterplots, we can take another look at whether there are some correlations between the explanatory variables themselves by using the corrgram function on the variables.
+
+```{r}
+library(gpairs)
+suppressWarnings(corrgram(data))
+```
+
+The blue color indicates positive correlation while red indicates negative correlation in the corrgram; moreover, the darker the color is, the stronger the relationship is. We can take a look at the last column: Po1 and Po2 have relatively darker blue colors that indicate their relatively strong positive linear relationships with the crime rate; Prob has relatively darker red color that indicates its relatively strong negative linear relationship with the crime rate. In any case, there is still none of the explanatory variables that exhibits a close linear relationship with the response variable, crime rate.
+
+# Data Hold-Out
+
+Before building the models, I would like to hold out part of the data as the test data, in order to have an unbiased estimate of the model performance.
+
+```{r}
+set.seed(2835)
+test_mask <- sample(nrow(data), round(nrow(data) * 0.2))
+test_data <- data[test_mask,]
+nontest_data <- data[-test_mask,] 
+```
+
+# A Regression Tree Model
+
+The following regression tree model is constructed using the rpart function from the rpart package. The word "rpart" stands for recursive partitioning, which is a greedy algorithm in looking for a reasonable groupings that can be represented by a tree.
+
+```{r}
+library(rpart)
+rt <- rpart(Crime ~ ., nontest_data, method = "anova")
+rt
+```
+
+Here the tree has two splits and three terminal nodes. To better visualize the regression tree model, the rpart.plot package offers a nice visualization of the tree as follows:
+
+```{r}
+library(rpart.plot)
+rpart.plot(rt)
+```
+
+It is easy to interpret the above tree plot. For example, if we are given an observation with the following values: $M = 14.0, So = 0, Ed = 10.0, Po1 = 12.0, Po2 = 15.5, LF = 0.640, M.F = 94.0, Pop = 150, NW = 1.1, U1 = 0.120, U2 = 3.6, Wealth = 3200, Ineq = 20.1, Prob = 0.04, Time = 39.0$. This piece of data is grouped into the right one at the first split for its Po1 is greater than $7.65$, and then it is grouped into the right one at the second split as its Time is also greater than $21.9$, and thus it is predicted to have the response value of $1295.7$.
+
+How does the rpart function construct this tree though? At each split, there is a variable $x_j$ and its corresponding cut-off value $c$. Given this variable and its cut-off value, the data set is divided into two groups: left group if $x_j < c$ and right group if $x_j >= c$. The variable and its cut-off value is chosen if the split by them has the minimum Residual Sum of Squares (RSS), which is defined in the following formula:
+
+$$
+RSS(j, c) = \sum_{i\in G_{1}}(y_{i} - \overline y_{1})^2 + \sum_{i\in G_{2}}(y_{i} - \overline y_{2})^2
+$$
+
+The RSS of a given variable $x_j$ and $c$ is calculated by the sum of the squares of the differences between data points in group 1 and the group mean as well as the same sum of the squared differences in group 2. The variable and its cut-off value with the minimum RSS are chosen, which is similar to the idea of fitting the best regression line with least square errors.
+
+The recursive partitioning algorithm repeats this process of searching for the variable and its cut-off value with the lease RSS within each subsequent group, where the number of splits is determined by how much the reduction in RSS is in comparison with Total Sum of Squares (TSS), which is calculated by the sum of squares of the difference between data points and the mean, given a split.
+
+In fact, detailed information is given by the summary on the output model as follows:
+
+```{r}
+summary(rt)
+```
+
+In the above summary, the variables ranked by importance are shown. In each node number, it shows top five possible splits using some candidate variables with their respective cut-off values and their corresponding improvement in reducing RSS. In node number 1, for example, if the variable Po1 and its cut-off value at 7.65 are used for splitting, RSS has reduced the largest by 36% (as same as using Po2 with cut-off value at 7.2) compared with TSS, hence being used for the first split.
+
+Not only does every node have its RSS, the whole regression tree model also has its RSS, which is calcuated by the following equation:
+
+$$
+RSS(T) = \sum_{j=1}^m\sum_{i\in G_{j}}(y_{i} - \overline y_{j})^2
+$$
+where $\bar y_j$ denote the mean values of response in each of the groups.
+
+Moreover, R-squared for the regression tree model can also be calculated by the following formula:
+
+$$
+R^2(T) = 1 - \frac{RSS(T)}{TSS}
+$$
+
+Thus, the R-squared of our regression tree model is calculated as follows:
+
+```{r}
+1 - (sum(residuals(rt)^2)) / (
+  sum((nontest_data$Crime - mean(nontest_data$Crime))^2))
+```
+
+Now that we have a better idea of how the rpart function constructs the regression tree model and the quality of the model with its RSS and R-squared. 
+
+Compared with linear regression, regression tree seems to be limited in terms of descriptive power. Since the model essentially divides the data set into groups and use the mean response values of data points in a given group to make predictions, there could still exist huge differences between the data points within groups, in such a way that the mean is not an effective descriptive value for a given data point in the same group. And such differences within groups would be likely to exist with a small data set, because there is initially a limited number of data points to be divided into groups after all.
+
+Nonetheless, the regression tree model can play a role of singling out important variables as the predictors, not only because the model output ranks variables by importance, but also because the data can be divided roughly by half by a given variable, which means that the variable could be an effective predictor for differentiating data points. It might help us to select a subset of explanatory variables in cases of many explanatory variables we have for a given data set.
+
+On a deeper thought, the regression tree model or CART in general is similar to the clustering model: the regression tree model essentially looks for a given variable and its cut-off value that can divide data points roughtly into half with the minimum RSS, whereas the clustering model looks for some dimensions and thus its corresponding variables that can divide data points into certain clusters. Yet, one of their differences lies on how the mean values are used: the regression tree model uses the mean response values of the groups to make predictions - the mean is used for prediction after the grouping, whereas the clustering model uses the mean values as cluster centroids to do the grouping - the mean is used for grouping itself.
+
+If the above line of thought related to clustering model is related to my first point, I believe the second point is connected with variable selection and Principal Component Analysis (PCA). If the regression tree model can help us single out some important explanatory variables that can differentiate data points well, then these variables are to be selected in a linear model and also play a larger role in constructing the first few Principal Components. 
+
+# A Random Forest Model
+
+The following random forest model is built using the randomForest function from the randomForest package. The algorithm generates a new set of observations by means of bootstrap, i.e. resampling uniformly at random with replacement, for the purpose of contructing each of the trees. 
+
+There are, however, two key differences in the construction of trees between rpart and randomForest functions. First, a number of variables (as specified by the mtry parameter) are selected at random to divide data points into groups during each split, whereas the variable and its cut-off value with the lease RSS is chosen. Second, randomForest constructs trees in full size without pruning. To be precise, each tree is grown until the number of data points in each terminal node is no more than the size of terminal nodes (as specified by the nodesize parameter). Each of the trees would overfit the data, yet each of them overfit the data differently, and the "overreaction" to the random effects is averaged out by taking the average of the predictions made by all the trees.
+
+```{r}
+library(randomForest)
+n_tree <- 5000
+rf <- randomForest(Crime ~ ., nontest_data, ntree = n_tree, mtry = 5)
+rf
+```
+
+Similar to regression tree, random forest model appears to be less descriptive than linear models. As the former president of Kaggle Jeremy Howard answered a question in Quora in the following [**link**](https://www.quora.com/When-is-a-random-forest-a-poor-choice-relative-to-other-algorithms), "it is important to recognize that it is a predictive modeling tool, not a descriptive tool - if you are looking for a description of the relationships in your data, you should look at other options." After all, it is hard to understand relationships between explanatory variables and the response variable, since a given tree is constructed by a randomly drawn set of some explanatory variables and a randomly drawn set of observations from the original data set, not to mention a multitude of trees in the model.
+
+# Model Comparison
+
+Now that we have a better idea about the two models, it is time to compare their performance by cross validation. Yet, I would like to first tune a parameter in the random forest model, namely "mtry", number of variables randomly sampled as candidates at each split (it is reasonable to set "ntree", the number of tree, as 5000, thus requiring no tuning). Nevertheless, there is no need to tune parameters of the regression tree, e.g. (1) the minimum number of observations that must exist in a node in order for a split to be attempted and (2) the minimum number of observations in any terminal node, given the small sample size.
+
+```{r}
+n_tree <- 5000
+n <- nrow(nontest_data)
+n_seq <- seq(1, n)
+errs <- rep(0, 15)
+for (x in 1:15) { # since there are 15 explanatory variables
+  preds <- sapply(n_seq, function(i) {
+    rf <- randomForest(Crime ~ ., nontest_data[-i,], 
+                       ntree = n_tree, mtry = x)
+    pred <- predict(rf, nontest_data[i, -ncol(nontest_data)])
+    return(pred)
+  })
+  errs[x] <- sum((nontest_data[, ncol(nontest_data)] - preds)^2)
+}
+which(errs == min(errs))
+```
+
+It is found that the prediction error is the lowest when "mtry" is set to 3. Now it is time to compare the performance of regression tree and random forest, using leave-one-out cross validation.
+
+```{r}
+rt_pred <- sapply(n_seq, function(i) {
+  rt <- rpart(Crime ~ ., nontest_data[-i,], method = "anova")
+  pred <- predict(rt, nontest_data[i, -ncol(nontest_data)])
+  return(pred)
+})
+rt_err <- sum((nontest_data[, ncol(nontest_data)] - rt_pred)^2)
+rt_err
+```
+
+```{r}
+n_tree <- 5000
+n_var <- 3
+rf_pred <- sapply(n_seq, function(i) {
+  rf <- randomForest(Crime ~ ., nontest_data[-i,], 
+                     ntree = n_tree, mtry = n_var)
+  pred <- predict(rf, nontest_data[i, -ncol(nontest_data)])
+  return(pred)
+})
+rf_err <- sum((nontest_data[, ncol(nontest_data)] - rf_pred)^2)
+rf_err
+```
+
+It is obvious that random forest performs better than regression tree, which does not surprise us at all given far more trees built in the former model. Now that we have the best model chosen, let us rebuild the model and make an unbiased estimate of the model performance by seeing how accurate it predicts on the test set.
+
+```{r}
+n_tree <- 5000
+n_var <- 3
+rf <- randomForest(Crime ~ ., nontest_data,
+                   ntree = n_tree, mtry = n_var)
+test_pred <- predict(rf, test_data[, -ncol(test_data)])
+test_err <- sum((test_data[, ncol(test_data)] - test_pred)^2)
+test_err
+```
+
+If the sum of squared errors is divided by the number of predictions and then is taken square root, we would have a rough idea about the deviance of the predictions on average.
+
+```{r}
+test_rt_avg_err <- sqrt(test_err / nrow(test_data))
+test_rt_avg_err
+```
+
+If we divide this number by the mean crime rates on the test set, we would have an idea about how far off the predictions, given the magnitude of the values.
+
+```{r}
+test_rt_avg_err / mean(test_data[, ncol(test_data)])
+```
+
+In other words, the predictions from the best model would be deviated from the actual values on average by about 32 percent, which is not bad given the small sample size. Yet, we can see that linear regression with selected variables in [my previous work](https://github.com/alfred-kctang/lm-crime) performs even better than random forest, with the average deviations of about 20 percent.
